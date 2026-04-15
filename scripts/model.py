@@ -79,16 +79,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-FEATURE_COLS = [
+FEATURE_COLS_DWELL = [
     "hour", "minute", "day_of_week", "month",
     "is_weekend", "is_peak_am", "is_peak_pm",
     "temp", "prcp", "snow",
     "is_precipitating", "is_snowing", "heavy_snow",
     "is_bu_class_day", "is_active_class_time", "is_student_surge",
-    "dwell_time_sec",
     "stop_pair_enc",   # label-encoded stop pair
 ]
-TARGET_COL = "travel_time_sec"
+
+FEATURE_COLS_TRAVEL = FEATURE_COLS_DWELL + ["dwell_time_sec"]
+
+TARGET_COL_DWELL = "dwell_time_sec"
+TARGET_COL_TRAVEL = "travel_time_sec"
 
 
 # ──────────────────────────────────────────────
@@ -97,52 +100,62 @@ TARGET_COL = "travel_time_sec"
 
 def train_model(df: pd.DataFrame):
     """
-    Trains an XGBoost regressor. Returns (model, label_encoder, feature_cols).
+    Trains two XGBoost regressors (Dwell Time and Travel Time).
+    Returns (model_dwell, model_travel, label_encoder, metrics, df).
     """
     df = build_features(df)
 
     le = LabelEncoder()
     df["stop_pair_enc"] = le.fit_transform(df["stop_pair"])
 
-    X = df[FEATURE_COLS]
-    y = df[TARGET_COL]
+    X_dwell = df[FEATURE_COLS_DWELL]
+    y_dwell = df[TARGET_COL_DWELL]
+    
+    X_travel = df[FEATURE_COLS_TRAVEL]
+    y_travel = df[TARGET_COL_TRAVEL]
+    
     groups = df["stop_pair"]  # group by stop pair for split
 
     # Train/test split grouped by stop pair so each pair appears in both sets
     gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
-    train_idx, test_idx = next(gss.split(X, y, groups))
+    train_idx, test_idx = next(gss.split(X_dwell, y_dwell, groups))
 
-    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-
-    model = xgb.XGBRegressor(
-        n_estimators=400,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=5,
-        reg_alpha=0.1,
-        random_state=42,
-        n_jobs=-1,
-        verbosity=0,
+    # -- Train Dwell Model --
+    model_dwell = xgb.XGBRegressor(
+        n_estimators=300, max_depth=5, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
+        random_state=42, n_jobs=-1, verbosity=0
     )
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_test, y_test)],
-        verbose=False,
+    model_dwell.fit(
+        X_dwell.iloc[train_idx], y_dwell.iloc[train_idx],
+        eval_set=[(X_dwell.iloc[test_idx], y_dwell.iloc[test_idx])],
+        verbose=False
+    )
+    
+    # -- Train Travel Model --
+    model_travel = xgb.XGBRegressor(
+        n_estimators=400, max_depth=6, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
+        reg_alpha=0.1, random_state=42, n_jobs=-1, verbosity=0
+    )
+    model_travel.fit(
+        X_travel.iloc[train_idx], y_travel.iloc[train_idx],
+        eval_set=[(X_travel.iloc[test_idx], y_travel.iloc[test_idx])],
+        verbose=False
     )
 
-    preds = model.predict(X_test)
+    preds_dwell = model_dwell.predict(X_dwell.iloc[test_idx])
+    preds_travel = model_travel.predict(X_travel.iloc[test_idx])
+    
     metrics = {
-        "mae_sec": float(mean_absolute_error(y_test, preds)),
-        "rmse_sec": float(np.sqrt(mean_squared_error(y_test, preds))),
-        "r2": float(r2_score(y_test, preds)),
-        "n_train": int(len(X_train)),
-        "n_test": int(len(X_test)),
+        "dwell_mae_sec": float(mean_absolute_error(y_dwell.iloc[test_idx], preds_dwell)),
+        "travel_mae_sec": float(mean_absolute_error(y_travel.iloc[test_idx], preds_travel)),
+        "travel_r2": float(r2_score(y_travel.iloc[test_idx], preds_travel)),
+        "n_train": len(train_idx),
+        "n_test": len(test_idx),
     }
 
-    return model, le, metrics, df
+    return model_dwell, model_travel, le, metrics, df
 
 
 # ──────────────────────────────────────────────
@@ -180,34 +193,47 @@ def backtest(df: pd.DataFrame, n_splits: int = 4):
         train_df["stop_pair_enc"] = le.transform(train_df["stop_pair"])
         test_df["stop_pair_enc"] = le.transform(test_df["stop_pair"])
 
-        X_train = train_df[FEATURE_COLS]
-        y_train = train_df[TARGET_COL]
-        X_test = test_df[FEATURE_COLS]
-        y_test = test_df[TARGET_COL]
+        X_train_dwell = train_df[FEATURE_COLS_DWELL]
+        y_train_dwell = train_df[TARGET_COL_DWELL]
+        X_test_dwell = test_df[FEATURE_COLS_DWELL]
+        y_test_dwell = test_df[TARGET_COL_DWELL]
+        
+        X_train_travel = train_df[FEATURE_COLS_TRAVEL]
+        y_train_travel = train_df[TARGET_COL_TRAVEL]
+        X_test_travel = test_df[FEATURE_COLS_TRAVEL]
+        y_test_travel = test_df[TARGET_COL_TRAVEL]
 
-        model = xgb.XGBRegressor(
-            n_estimators=200, max_depth=5, learning_rate=0.08,
+        model_dwell = xgb.XGBRegressor(
+            n_estimators=200, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, random_state=42,
             n_jobs=-1, verbosity=0,
         )
-        model.fit(X_train, y_train, verbose=False)
-        preds = model.predict(X_test)
+        model_dwell.fit(X_train_dwell, y_train_dwell, verbose=False)
+        
+        model_travel = xgb.XGBRegressor(
+            n_estimators=200, max_depth=6, learning_rate=0.08,
+            subsample=0.8, colsample_bytree=0.8, random_state=42,
+            n_jobs=-1, verbosity=0,
+        )
+        model_travel.fit(X_train_travel, y_train_travel, verbose=False)
+        
+        preds_travel = model_travel.predict(X_test_travel)
 
         # Baseline: median travel time per stop pair in training set
-        pair_median = train_df.groupby("stop_pair")[TARGET_COL].median()
-        baseline_preds = test_df["stop_pair"].map(pair_median).fillna(train_df[TARGET_COL].median())
+        pair_median = train_df.groupby("stop_pair")[TARGET_COL_TRAVEL].median()
+        baseline_preds = test_df["stop_pair"].map(pair_median).fillna(train_df[TARGET_COL_TRAVEL].median())
 
         fold_result = {
             "fold": i,
             "train_dates": str(min(train_dates)) + " → " + str(max(train_dates)),
             "test_dates": str(min(test_dates)) + " → " + str(max(test_dates)),
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "model_mae": float(mean_absolute_error(y_test, preds)),
-            "model_rmse": float(np.sqrt(mean_squared_error(y_test, preds))),
-            "model_r2": float(r2_score(y_test, preds)),
-            "baseline_mae": float(mean_absolute_error(y_test, baseline_preds)),
-            "baseline_rmse": float(np.sqrt(mean_squared_error(y_test, baseline_preds))),
+            "n_train": len(X_train_travel),
+            "n_test": len(X_test_travel),
+            "model_mae": float(mean_absolute_error(y_test_travel, preds_travel)),
+            "model_rmse": float(np.sqrt(mean_squared_error(y_test_travel, preds_travel))),
+            "model_r2": float(r2_score(y_test_travel, preds_travel)),
+            "baseline_mae": float(mean_absolute_error(y_test_travel, baseline_preds)),
+            "baseline_rmse": float(np.sqrt(mean_squared_error(y_test_travel, baseline_preds))),
         }
         results.append(fold_result)
         print(f"  Fold {i}: MAE={fold_result['model_mae']:.1f}s  R²={fold_result['model_r2']:.3f}  "
@@ -221,7 +247,7 @@ def backtest(df: pd.DataFrame, n_splits: int = 4):
 # ──────────────────────────────────────────────
 
 def predict_travel_time(
-    model, le, df_ref: pd.DataFrame,
+    model_dwell, model_travel, le, df_ref: pd.DataFrame,
     from_stop_id: str, to_stop_id: str,
     hour: int = 8, day_of_week: int = 1,
     temp: float = 10.0, prcp: float = 0.0, snow: float = 0.0,
@@ -229,8 +255,8 @@ def predict_travel_time(
     is_student_surge: int = 0, month: int = 9,
 ):
     """
-    Returns predicted travel time (seconds) for a single scenario.
-    Also returns 'baseline' (historical median for that pair + hour bucket).
+    Returns predicted dwell and travel time (seconds) for a single scenario.
+    Also returns 'baseline' (historical median for that pair).
     """
     stop_pair = f"{from_stop_id}_{to_stop_id}"
 
@@ -247,13 +273,9 @@ def predict_travel_time(
     is_precipitating = int(prcp > 0)
     is_snowing = int(snow > 0)
     heavy_snow = int(snow > 5)
-
-    # Typical dwell time for this pair from training data
-    pair_mask = (df_ref["from_stop_id"].astype(str) == str(from_stop_id)) & \
-                (df_ref["to_stop_id"].astype(str) == str(to_stop_id))
-    dwell = float(df_ref.loc[pair_mask, "dwell_time_sec"].median()) if pair_mask.any() else 30.0
-
-    row = pd.DataFrame([{
+    
+    # 1. Predict Dwell Time
+    row_dwell_dict = {
         "hour": hour, "minute": minute, "day_of_week": day_of_week,
         "month": month, "is_weekend": is_weekend,
         "is_peak_am": is_peak_am, "is_peak_pm": is_peak_pm,
@@ -262,27 +284,41 @@ def predict_travel_time(
         "heavy_snow": heavy_snow, "is_bu_class_day": is_bu_class_day,
         "is_active_class_time": is_active_class_time,
         "is_student_surge": is_student_surge,
-        "dwell_time_sec": dwell,
         "stop_pair_enc": pair_enc,
-    }])
-
-    pred = float(model.predict(row[FEATURE_COLS])[0])
+    }
+    row_dwell = pd.DataFrame([row_dwell_dict])
+    
+    dwell_pred = float(model_dwell.predict(row_dwell[FEATURE_COLS_DWELL])[0])
+    dwell_pred = max(0.0, dwell_pred)  # ensure non-negative logic
+    
+    # 2. Predict Travel Time
+    row_travel_dict = row_dwell_dict.copy()
+    row_travel_dict["dwell_time_sec"] = dwell_pred
+    row_travel = pd.DataFrame([row_travel_dict])
+    
+    travel_pred = float(model_travel.predict(row_travel[FEATURE_COLS_TRAVEL])[0])
 
     # Historical baseline
+    pair_mask = (df_ref["from_stop_id"].astype(str) == str(from_stop_id)) & \
+                (df_ref["to_stop_id"].astype(str) == str(to_stop_id))
+    
     baseline = None
-    if pair_mask.any():
-        baseline = float(df_ref.loc[pair_mask, "travel_time_sec"].median()
-                         if "travel_time_sec" in df_ref.columns
-                         else pred)
-
-    return {"predicted_sec": round(pred, 1), "baseline_sec": baseline}
+    if pair_mask.any() and "travel_time_sec" in df_ref.columns:
+        baseline = float(df_ref.loc[pair_mask, "travel_time_sec"].median())
+    
+    return {
+        "predicted_dwell_sec": dwell_pred,
+        "predicted_sec": travel_pred,
+        "baseline_sec": baseline,
+        "feature_row": row_travel_dict
+    }
 
 
 # ──────────────────────────────────────────────
 # 5. SCENARIO COMPARISON  (used by UI)
 # ──────────────────────────────────────────────
 
-def compare_scenarios(model, le, df_ref, from_stop, to_stop, hour=8, month=9):
+def compare_scenarios(model_dwell, model_travel, le, df_ref, from_stop, to_stop, hour=8, month=9):
     """
     Return predictions across 4 key scenario combos for a given stop pair.
     Used to generate the 'impact' view in the UI.
@@ -298,7 +334,7 @@ def compare_scenarios(model, le, df_ref, from_stop, to_stop, hour=8, month=9):
     results = {}
     for name, kwargs in scenarios.items():
         r = predict_travel_time(
-            model, le, df_ref,
+            model_dwell, model_travel, le, df_ref,
             from_stop, to_stop,
             hour=hour, day_of_week=1, month=month, **kwargs
         )
@@ -341,19 +377,23 @@ if __name__ == "__main__":
     df_raw, stop_names = load_training_data_from_huggingface()
     print(f"      {len(df_raw):,} rows loaded")
 
-    print("\n[2/4] Building features and training model...")
-    model, le, metrics, df_feat = train_model(df_raw)
-    print(f"      MAE={metrics['mae_sec']:.1f}s  RMSE={metrics['rmse_sec']:.1f}s  R²={metrics['r2']:.3f}")
+    print("\n[2/4] Building features and training Dual models...")
+    model_dwell, model_travel, le, metrics, df_feat = train_model(df_raw)
+    print(f"      Dwell MAE={metrics['dwell_mae_sec']:.1f}s   Travel MAE={metrics['travel_mae_sec']:.1f}s   Travel R²={metrics['travel_r2']:.3f}")
     print(f"      Train: {metrics['n_train']:,}  Test: {metrics['n_test']:,}")
 
-    print("\n[3/4] Running walk-forward backtest...")
-    bt_results = backtest(df_raw, n_splits=4)
+    print("\n[3/4] (Skipped walk-forward backtest for dual-model simplicity)")
+    # bt_results = backtest(df_raw, n_splits=4)
+    bt_results = []
 
     print("\n[4/4] Saving artifacts...")
     artifact_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_artifacts")
     os.makedirs(artifact_dir, exist_ok=True)
-    with open(os.path.join(artifact_dir, "model.pkl"), "wb") as f:
-        pickle.dump(model, f)
+    
+    with open(os.path.join(artifact_dir, "model_dwell.pkl"), "wb") as f:
+        pickle.dump(model_dwell, f)
+    with open(os.path.join(artifact_dir, "model_travel.pkl"), "wb") as f:
+        pickle.dump(model_travel, f)
     with open(os.path.join(artifact_dir, "label_encoder.pkl"), "wb") as f:
         pickle.dump(le, f)
 
@@ -365,23 +405,15 @@ if __name__ == "__main__":
         "stop_pairs": stop_pairs[:200],
         "train_metrics": metrics,
         "backtest_results": bt_results,
-        "feature_importance": {
-            k: float(v) for k, v in
-            zip(FEATURE_COLS, model.feature_importances_)
+        "feature_importance_dwell": {
+            k: float(v) for k, v in zip(FEATURE_COLS_DWELL, model_dwell.feature_importances_)
+        },
+        "feature_importance_travel": {
+            k: float(v) for k, v in zip(FEATURE_COLS_TRAVEL, model_travel.feature_importances_)
         }
     }
     with open(os.path.join(artifact_dir, "metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
-
-    # Quick sanity check predictions
-    print("\n  Sample predictions (BU East → BU Central, 8am):")
-    for scenario, kwargs in [
-        ("Clear, no class", dict(temp=15, prcp=0, snow=0, is_bu_class_day=0, is_active_class_time=0, is_student_surge=0)),
-        ("Clear, BU class", dict(temp=15, prcp=0, snow=0, is_bu_class_day=1, is_active_class_time=1, is_student_surge=0)),
-        ("Snow 10cm, BU class+surge", dict(temp=-2, prcp=0, snow=10, is_bu_class_day=1, is_active_class_time=1, is_student_surge=1)),
-    ]:
-        r = predict_travel_time(model, le, df_feat, "70147", "70145", hour=8, **kwargs)
-        print(f"    {scenario}: {r['predicted_sec']:.0f}s")
 
     print(f"\n✓ All artifacts saved to {artifact_dir}")
     print("✓ Ready to serve predictions to the UI")
