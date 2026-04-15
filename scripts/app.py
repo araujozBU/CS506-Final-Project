@@ -5,7 +5,15 @@ import pickle
 import json
 import os
 
-from model import predict_travel_time, load_training_data_from_huggingface
+from model import predict_travel_time, load_training_data_from_huggingface, build_features
+
+def format_time(seconds):
+    if seconds is None or pd.isna(seconds):
+        return "N/A"
+    seconds = int(seconds)
+    m = seconds // 60
+    s = seconds % 60
+    return f"{m}m {s}s"
 
 # --- 1. Load Artifacts ---
 @st.cache_resource
@@ -28,6 +36,7 @@ def load_artifacts():
 @st.cache_data
 def load_reference_data():
     df_ref, _ = load_training_data_from_huggingface()
+    df_ref = build_features(df_ref)
     return df_ref
 
 
@@ -84,8 +93,10 @@ snow = st.sidebar.slider("Snow (mm)", 0.0, 30.0, 0.0)
 # BU Context
 st.sidebar.subheader("BU Campus Context")
 is_bu_class_day = st.sidebar.checkbox("BU Class Day", value=True)
-is_active_class_time = st.sidebar.checkbox("Active Class Time (8am-6pm)", value=True)
-is_student_surge = st.sidebar.checkbox("Student Surge (Class transition window)", value=False)
+
+# Infer class period flags if it's a BU class day (e.g. 8am-6pm is active, specific hours are surges)
+is_active_class_time = is_bu_class_day and (8 <= hour <= 18)
+is_student_surge = is_bu_class_day and (hour in [10, 12, 14, 16])
 
 # --- 3. Inference Logic ---
 if st.button("Predict Travel Time"):
@@ -147,9 +158,9 @@ if st.button("Predict Travel Time"):
 
         segments_str.append({
             "Segment": f"{seg_from} ➔ {seg_to}",
-            "Predicted Dwell (sec)": int(dwell_time_sec),
-            "Predicted Travel Time (mins)": round(segment_sec / 60, 1),
-            "Baseline Travel Time (mins)": round(pred_result["baseline_sec"] / 60, 1) if pred_result["baseline_sec"] is not None else None,
+            "Predicted Dwell": format_time(dwell_time_sec),
+            "Predicted Travel Time": format_time(segment_sec),
+            "Baseline Travel Time": format_time(pred_result["baseline_sec"])
         })
         row = pred_result["feature_row"] # Keep the last row for display
         
@@ -163,7 +174,7 @@ if st.button("Predict Travel Time"):
     with col1:
         st.metric(
             label=f"Total Commute: {from_stop_name} ➔ {to_stop_name} ({direction})",
-            value=f"{pred_sec/60:.1f} mins",
+            value=format_time(pred_sec),
             delta=f"Includes {int(total_dwell_time_sec)}s of platform waiting",
             delta_color="off"
         )
