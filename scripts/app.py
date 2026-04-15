@@ -5,6 +5,8 @@ import pickle
 import json
 import os
 
+from model import predict_travel_time, load_training_data_from_huggingface
+
 # --- 1. Load Artifacts ---
 @st.cache_resource
 def load_artifacts():
@@ -19,6 +21,35 @@ def load_artifacts():
         metadata = json.load(f)
         
     return model, le, metadata
+
+
+@st.cache_data
+def load_reference_data():
+    df_ref, _ = load_training_data_from_huggingface()
+    return df_ref
+
+
+def estimate_dwell_time(df_ref: pd.DataFrame, from_stop_id: str, to_stop_id: str, is_student_surge: int, is_active_class_time: int) -> float:
+    pair_mask = (
+        df_ref["from_stop_id"].astype(str) == str(from_stop_id)
+    ) & (
+        df_ref["to_stop_id"].astype(str) == str(to_stop_id)
+    )
+
+    if not pair_mask.any():
+        return float(df_ref["dwell_time_sec"].median())
+
+    pair_df = df_ref[pair_mask]
+    dwell = np.nan
+    if is_student_surge:
+        dwell = pair_df.loc[pair_df["is_student_surge"] == 1, "dwell_time_sec"].median()
+    if np.isnan(dwell) and is_active_class_time:
+        dwell = pair_df.loc[pair_df["is_active_class_time"] == 1, "dwell_time_sec"].median()
+    if np.isnan(dwell):
+        dwell = pair_df["dwell_time_sec"].median()
+    if np.isnan(dwell):
+        dwell = float(df_ref["dwell_time_sec"].median())
+    return float(dwell)
 
 model, le, metadata = load_artifacts()
 stop_names = metadata["stop_names"]
@@ -98,91 +129,84 @@ if st.button("Predict Travel Time"):
     is_weekend = int(day_of_week >= 5)
     is_peak_am = int(7 <= hour <= 9)
     is_peak_pm = int(16 <= hour <= 19)
-    is_precipitating = int(prcp > 0)
-    is_snowing = int(snow > 0)
-    heavy_snow = int(snow > 5)
     
-    feature_cols = [
-        "hour", "minute", "day_of_week", "month",
-        "is_weekend", "is_peak_am", "is_peak_pm",
-        "temp", "prcp", "snow",
-        "is_precipitating", "is_snowing", "heavy_snow",
-        "is_bu_class_day", "is_active_class_time", "is_student_surge",
-        "dwell_time_sec",
-        "stop_pair_enc"
-    ]
-    
+    df_ref = load_reference_data()
+
     total_travel_time_sec = 0.0
     total_dwell_time_sec = 0.0
     segments_str = []
-    
-    # Identify heavy BU traffic stops
-    bu_heavy_stops = ["BU East", "BU Central", "Amory", "Babcock", "Blandford St"]
-    
+
     for i in range(len(route_stop_names) - 1):
         seg_from = route_stop_names[i]
         seg_to = route_stop_names[i+1]
         
         from_id = PLATFORM_IDS[direction][seg_from]
         to_id = PLATFORM_IDS[direction][seg_to]
-        stop_pair = f"{from_id}_{to_id}"
-        
-        try:
-            pair_enc = le.transform([stop_pair])[0]
-        except ValueError:
-            pair_enc = 0 # fallback
-            
-        # Calculate dynamic Dwell Time based on BU schedule and stop popularity
-        if seg_from in bu_heavy_stops and is_student_surge:
-            dwell_time_sec = 85.0  # Massive delay during class transition
-        elif seg_from in bu_heavy_stops and is_active_class_time:
-            dwell_time_sec = 45.0
-        else:
-            dwell_time_sec = 25.0  # Normal loading time
-        
-        row = pd.DataFrame([{
-            "hour": hour, "minute": minute, "day_of_week": day_of_week, "month": month,
-            "is_weekend": is_weekend, "is_peak_am": is_peak_am, "is_peak_pm": is_peak_pm,
-            "temp": temp, "prcp": prcp, "snow": snow,
-            "is_precipitating": is_precipitating, "is_snowing": is_snowing, "heavy_snow": heavy_snow,
-            "is_bu_class_day": int(is_bu_class_day), "is_active_class_time": int(is_active_class_time), 
-            "is_student_surge": int(is_student_surge),
-            "dwell_time_sec": dwell_time_sec,
-            "stop_pair_enc": pair_enc,
-        }])[feature_cols] # Ensure column order matches training
-        
-        segment_sec = float(model.predict(row)[0])
+
+        pred_result = predict_travel_time(
+            model, le, df_ref,
+            from_id, to_id,
+            hour=hour,
+            day_of_week=day_of_week,
+            temp=temp,
+            prcp=prcp,
+            snow=snow,
+            is_bu_class_day=int(is_bu_class_day),
+            is_active_class_time=int(is_active_class_time),
+            is_student_surge=int(is_student_surge),
+            month=month,
+        )
+
+        dwell_time_sec = estimate_dwell_time(
+            df_ref, from_id, to_id,
+            int(is_student_surge), int(is_active_class_time)
+        )
+
+        segment_sec = float(pred_result["predicted_sec"])
         total_travel_time_sec += segment_sec
-        total_dwell_time_sec += dwell_time_sec
-        
+        if i > 0:
+            total_dwell_time_sec += dwell_time_sec
+
         segments_str.append({
-            "Segment": f"{seg_from} ➔ {seg_to}", 
-            "Boarding Dwell (sec)": int(dwell_time_sec),
-            "Travel Time (mins)": round(segment_sec/60, 1)
+            "Segment": f"{seg_from} ➔ {seg_to}",
+            "Estimated Dwell (sec)": int(dwell_time_sec),
+            "Predicted Travel Time (mins)": round(segment_sec / 60, 1),
+            "Baseline Travel Time (mins)": round(pred_result["baseline_sec"] / 60, 1) if pred_result["baseline_sec"] is not None else None,
         })
-        
-    pred_sec = total_travel_time_sec
-    
+
+    pred_sec = total_travel_time_sec + total_dwell_time_sec
+
     # --- 4. Display Results ---
     st.markdown("---")
-    
     col1, col2 = st.columns(2)
     with col1:
         st.metric(
-            label=f"Total Commute: {from_stop_name} ➔ {to_stop_name} ({direction})", 
+            label=f"Total Commute: {from_stop_name} ➔ {to_stop_name} ({direction})",
             value=f"{pred_sec/60:.1f} mins",
             delta=f"Includes {int(total_dwell_time_sec)}s of platform waiting",
             delta_color="off"
         )
-        
     with col2:
         st.info("💡 **Insights:**\n" +
                 f"- Weather constraint active: {'Yes' if prcp > 0 or snow > 0 else 'No'}\n" +
                 f"- BU Student Surge factor: {'Active' if is_student_surge else 'Inactive'}")
-    
+
     st.subheader("🔍 Trip Segment Breakdown")
     st.table(pd.DataFrame(segments_str))
-    
-    # Optional: Display raw feature values for transparency
+
     with st.expander("Show last model feature inputs"):
-        st.dataframe(row)
+        st.write({
+            "hour": hour,
+            "minute": minute,
+            "day_of_week": day_of_week,
+            "month": month,
+            "is_weekend": is_weekend,
+            "is_peak_am": is_peak_am,
+            "is_peak_pm": is_peak_pm,
+            "temp": temp,
+            "prcp": prcp,
+            "snow": snow,
+            "is_bu_class_day": int(is_bu_class_day),
+            "is_active_class_time": int(is_active_class_time),
+            "is_student_surge": int(is_student_surge),
+        })
