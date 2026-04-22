@@ -1,70 +1,176 @@
-# The BU Commuter’s Guide to the B-Branch: Predicting Transit Reliability
+# The BU Commuter's Guide to the B-Branch: Predicting Transit Reliability
 ### *A Segment-Level Analysis of Weather and Academic Schedule Impacts*
 
-## 1. Project Description & Motivation
-While the MBTA Green Line is the lifeblood of the Boston University campus, its reliability is notoriously volatile. Because the B-Branch operates at street level along Commonwealth Avenue, it is uniquely susceptible to two types of "shocks": 
-1. **Meteorological Shocks:** Rain and snow affecting track friction, visibility, and "portal" entry speeds.
-2. **Social Shocks:** Massive "Student Surges" during BU class transition windows.
+## Project Description
 
-This project aims to move beyond generic delay alerts by building a context-aware predictive model. We treat a trip not as a single event, but as a sequence of **Running Time** (inter-station movement) and **Dwell Time** (platform boarding) segments. By modeling these separately, we provide a granular "Trip Calculator" that accounts for exactly how weather and the BU Academic Calendar impact a student's specific commute.
+The MBTA Green Line B-Branch serves as the primary transit corridor for Boston University students along Commonwealth Avenue. Because it runs at street level, it is uniquely susceptible to two types of disruptions:
 
----
+1. **Meteorological Shocks** — Rain and snow affecting track friction, visibility, and portal entry speeds.
+2. **Social Shocks** — "Student Surges" during BU class transition windows that spike boarding volumes at key stations.
 
-## 2. Project Goals
-* **Segment-Level Accuracy:** Predict Running and Dwell times for key BU segments (Babcock St to Kenmore) with a Mean Absolute Error (MAE) of less than 45 seconds.
-* **Component Decomposition:** Quantify the delay caused by "Dwell Time" (boarding volume) vs. "Running Time" (train speed).
-* **Contextual Forecasting:** Successfully identify "Student Surge" patterns by correlating delays with the BU class schedule and semester calendar.
-* **Trip Summation:** Create a tool that calculates the total predicted commute:  
-    $$Total\ Time = Dwell_{start} + \sum(Running_{segments}) + \sum(Dwell_{intermediate})$$
+This project builds a context-aware predictive model that treats a commute as a sequence of **Running Time** (inter-station movement) and **Dwell Time** (platform boarding) segments rather than a single event. Two XGBoost regressors are trained separately on these components, then composed into a trip calculator that accounts for how weather and the BU Academic Calendar affect a student's specific commute.
 
----
+**Current model performance:**
+- Dwell Time MAE: ~20 seconds
+- Running Time MAE: ~28 seconds
 
-## 3. Data Collection Plan
-
-### Data Sources
-* **MBTA Blue Book / Open Data Portal:** We are utilizing the [MBTA Rapid Transit Travel Times dataset](https://mbta-massdot.opendata.arcgis.com/datasets/5f71a5c035fc4a4dad1b7fa73ba27ef8/about) to extract high-resolution event data (Arrivals vs. Departures) for the B-Branch.
-* **Meteostat / OpenWeather API:** Historical hourly weather data for Boston (Precipitation, Snow Depth, Temperature, and Wind Speed).
-* **BU Academic Context:** A manually curated dataset based on the **BU 2025-2026 Academic Calendar**, including holiday flags, Spring Break dates, and the standard 10-minute class transition windows.
-
-### Feature Engineering
-We will transform raw timestamps into a "Context Matrix" including:
-* **`is_class_change`**: Binary flag for the 10-minute windows around BU class starts/ends.
-* **`is_semester`**: Binary flag to exclude summer/winter breaks.
-* **`direction_id`**: To account for directional flow (Inbound/Eastbound in the morning vs. Outbound/Westbound in the afternoon).
+The project exposes a Streamlit web app where users configure their trip, weather conditions, and BU context to receive a segment-by-segment commute prediction.
 
 ---
 
-## 4. Modeling & Implementation
-We will implement a **Random Forest Regressor**. This ensemble method is ideal for handling the non-linear relationships in transit data—such as the "tipping point" where light snow causes disproportionately large delays at the Blandford St portal entry.
+## Repository Structure
 
-The model will be a **Dual-Target Regressor**, predicting:
-1.  **Running Time:** Primarily influenced by weather and track conditions.
-2.  **Dwell Time:** Primarily influenced by class schedules and station location (e.g., BU Central vs. Blandford).
-
----
-
-## 5. Visualization Plan
-* **Stacked Component Analysis:** A visualization showing a "Trip Breakdown" where users can see time spent moving vs. time spent at platforms.
-* **The "Student Surge" Heatmap:** A temporal map showing how dwell times at BU-specific stations spike in sync with the university's bell schedule.
-* **Weather Sensitivity Index:** A comparison of how different segments react to precipitation.
-
----
-
-## 6. Test Plan
-We will use a **Temporal Train-Test Split** to ensure the model's real-world utility:
-* **Training Set:** Data from the first half of the semester (e.g., September – October).
-* **Testing Set:** Data from the latter half (November – December). 
-This allows us to evaluate how the model handles the transition from "Fall Rain" to "Winter Snow" and changes in ridership during "Finals Week."
+```
+.
+├── requirements.txt              # Python dependencies
+├── scripts/
+│   ├── dataset_creation.py       # ETL pipeline — downloads raw MBTA data, merges weather, outputs Parquet
+│   ├── dataset_example.py        # Utility — streams sample rows from Hugging Face for inspection
+│   ├── model.py                  # Model training, backtesting, and prediction logic
+│   ├── app.py                    # Streamlit web UI
+│   └── model_artifacts/
+│       ├── model_dwell.pkl       # Trained XGBoost dwell-time model
+│       ├── model_travel.pkl      # Trained XGBoost running-time model
+│       ├── label_encoder.pkl     # Stop-pair label encoder
+│       └── metadata.json         # Stop names, model metrics, feature importance
+```
 
 ---
 
-## Team & Repository
-* **Group Size:** 5 students  
-* **GitHub Repository:** [https://github.com/araujozBU/CS506-Final-Project](https://github.com/araujozBU/CS506-Final-Project)
+## Environment
 
-### Team Members
-* **Zaki Araujo** (araujoz@bu.edu)
-* **Adrian Dybacki** (adybacki@bu.edu)
-* **Andrew Botolino** (botolino@bu.edu)
-* **Kuba Rozwadowski** (kubaroz@bu.edu)
-* **Rohan Chablani** (rohan204@bu.edu)
+- **Python:** 3.10 or later
+- **OS:** macOS, Linux, or Windows (WSL recommended on Windows)
+- **Hardware:** No GPU required; training runs on CPU in under a few minutes
+- **Disk:** ~500 MB for raw MBTA data download and Parquet output
+
+---
+
+## Setup
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/araujozBU/CS506-Final-Project.git
+cd CS506-Final-Project
+
+# 2. (Recommended) Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate      # macOS/Linux
+.venv\Scripts\activate         # Windows
+
+# 3. Install dependencies
+pip install -r requirements.txt
+```
+
+---
+
+## Usage
+
+### Step 1 — Build the Dataset
+
+Downloads ~24 months of MBTA Green Line B-Branch travel times from Hugging Face, merges hourly weather from Meteostat (Boston Logan), and applies BU academic calendar flags. Outputs a cleaned Parquet file.
+
+```bash
+python scripts/dataset_creation.py
+```
+
+This step requires an internet connection and may take several minutes on the first run.
+
+### Step 2 — Train the Models
+
+Trains dual XGBoost regressors for dwell time and running time, then saves model artifacts to `scripts/model_artifacts/`.
+
+```bash
+python scripts/model.py
+```
+
+Pre-trained artifacts are already committed to the repository; re-run this step only if you have rebuilt the dataset or want to retrain from scratch.
+
+### Step 3 — Launch the Web App
+
+```bash
+streamlit run scripts/app.py
+```
+
+Open the URL printed in your terminal (typically `http://localhost:8501`). Configure:
+
+- **Route** — Start and end station (8 stations across Westbound/Eastbound)
+- **Time** — Hour, day of week, month
+- **Weather** — Temperature (°F), precipitation (mm), snow depth (mm)
+- **BU context** — Toggle "BU Class Day" to auto-infer active hours and surge flags
+
+The app displays a segment-by-segment breakdown showing predicted time versus the historical baseline for each stop pair.
+
+### Inspect a Dataset Sample
+
+```bash
+python scripts/dataset_example.py
+```
+
+Streams 10 rows from the Hugging Face ML-ready dataset for quick inspection without a local download.
+
+---
+
+## Data Sources
+
+| Source | Description |
+|--------|-------------|
+| [MBTA Rapid Transit Travel Times](https://mbta-massdot.opendata.arcgis.com/datasets/5f71a5c035fc4a4dad1b7fa73ba27ef8/) | Raw arrival/departure event data for the B-Branch (2024–2026), hosted on Hugging Face as `adybacki/24_25_26_mbta_lr_travel_times` |
+| [Meteostat](https://meteostat.net/) | Hourly weather data for Boston Logan (station ID: `72503`) |
+| BU Academic Calendar | Manually curated semester ranges, holidays, spring breaks, and class transition windows for 2024–2026 |
+| ML-Ready Dataset | Processed and feature-engineered dataset on Hugging Face: `adybacki/bu_green_line_ml_ready` |
+
+---
+
+## Testing
+
+The project includes a built-in **walk-forward backtesting** function in [`scripts/model.py`](scripts/model.py) that evaluates model generalization by training on earlier data and testing on later dates.
+
+To run backtesting, uncomment the `backtest(df)` call at the bottom of `scripts/model.py` and re-run:
+
+```bash
+python scripts/model.py
+```
+
+This performs a 4-split temporal cross-validation using `GroupShuffleSplit` by stop pair, printing MAE and R² for each split.
+
+To verify the dataset pipeline, `dataset_example.py` streams a small sample from Hugging Face for manual inspection:
+
+```bash
+python scripts/dataset_example.py
+```
+
+---
+
+## Contributing
+
+1. **Fork** the repository and create a feature branch from `main`:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Make your changes.** Keep each branch focused on a single concern (data pipeline, model changes, UI, etc.).
+
+3. **Test your changes** by running the backtesting function and verifying the Streamlit app loads without errors.
+
+4. **Commit** with a clear message describing the *why* behind the change.
+
+5. **Open a pull request** against `main`. Include:
+   - A short description of what changed and why
+   - Any impact on model metrics (MAE, R²) if model artifacts were retrained
+
+**Reporting bugs or ideas:** Open an issue on the [GitHub repository](https://github.com/araujozBU/CS506-Final-Project/issues) with as much context as possible (OS, Python version, error message, steps to reproduce).
+
+---
+
+## Team
+
+| Name | Email |
+|------|-------|
+| Zaki Araujo | araujoz@bu.edu |
+| Adrian Dybacki | adybacki@bu.edu |
+| Andrew Botolino | botolino@bu.edu |
+| Kuba Rozwadowski | kubaroz@bu.edu |
+| Rohan Chablani | rohan204@bu.edu |
+
+**Repository:** [https://github.com/araujozBU/CS506-Final-Project](https://github.com/araujozBU/CS506-Final-Project)
