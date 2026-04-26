@@ -53,43 +53,11 @@ The project exposes a Streamlit web app where users configure their trip, weathe
 git clone https://github.com/araujozBU/CS506-Final-Project.git
 cd CS506-Final-Project
 
-# 2. (Recommended) Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate      # macOS/Linux
-.venv\Scripts\activate         # Windows
+# 2. Install all dependencies
+make install
 
-# 3. Install dependencies
-pip install -r requirements.txt
-```
-
----
-
-## Usage
-
-### Step 1 — Build the Dataset
-
-Downloads ~24 months of MBTA Green Line B-Branch travel times from Hugging Face, merges hourly weather from Meteostat (Boston Logan), and applies BU academic calendar flags. Outputs a cleaned Parquet file.
-
-```bash
-python scripts/dataset_creation.py
-```
-
-This step requires an internet connection and may take several minutes on the first run.
-
-### Step 2 — Train the Models
-
-Trains dual XGBoost regressors for dwell time and running time, then saves model artifacts to `scripts/model_artifacts/`.
-
-```bash
-python scripts/model.py
-```
-
-Pre-trained artifacts are already committed to the repository; re-run this step only if you have rebuilt the dataset or want to retrain from scratch.
-
-### Step 3 — Launch the Web App
-
-```bash
-streamlit run scripts/app.py
+# 3. Launch the web app
+make run
 ```
 
 Open the URL printed in your terminal (typically `http://localhost:8501`). Configure:
