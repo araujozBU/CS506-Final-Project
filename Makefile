@@ -30,10 +30,10 @@ run: install
 # (Optional) Rebuilds the ML-ready Parquet from raw MBTA CSVs + weather.
 # Requires an internet connection; downloads ~24 months of data from Hugging Face.
 # Pre-built artifacts are already committed — only run this to regenerate from scratch.
-.PHONY: dataset
-dataset: install
-	@echo "Building dataset (downloads raw MBTA data from Hugging Face)..."
-	$(PY) scripts/dataset_creation.py
+# .PHONY: dataset
+# dataset: install
+#	 @echo "Building dataset (downloads raw MBTA data from Hugging Face)..."
+#	 $(PY) scripts/dataset_creation.py
 
 # ── train ──────────────────────────────────────────────────────────────────────
 # (Optional) Retrains XGBoost models and saves artifacts to scripts/model_artifacts/.
