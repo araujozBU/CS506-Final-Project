@@ -114,11 +114,12 @@ def train_model(df: pd.DataFrame):
     X_travel = df[FEATURE_COLS_TRAVEL]
     y_travel = df[TARGET_COL_TRAVEL]
     
-    groups = df["stop_pair"]  # group by stop pair for split
+    groups = df["stop_pair"]
 
     # Train/test split grouped by stop pair so each pair appears in both sets
-    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
-    train_idx, test_idx = next(gss.split(X_dwell, y_dwell, groups))
+        train_idx, test_idx = train_test_split(
+        range(len(df)), test_size=0.2, random_state=42
+    )
 
     # -- Train Dwell Model --
     model_dwell = xgb.XGBRegressor(
