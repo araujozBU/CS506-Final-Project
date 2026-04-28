@@ -18,7 +18,7 @@ import pickle
 import os
 from datetime import datetime
 
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
@@ -117,7 +117,7 @@ def train_model(df: pd.DataFrame):
     groups = df["stop_pair"]
 
     # Train/test split grouped by stop pair so each pair appears in both sets
-        train_idx, test_idx = train_test_split(
+    train_idx, test_idx = train_test_split(
         range(len(df)), test_size=0.2, random_state=42
     )
 
