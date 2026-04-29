@@ -3,12 +3,17 @@
 
 ## Project Description
 
-The MBTA Green Line B-Branch serves as the primary transit corridor for Boston University students along Commonwealth Avenue. Because it runs at street level, it is uniquely susceptible to two types of disruptions:
+Because the MBTA's Green Line B-Branch runs at street level through Boston University, it is uniquely susceptible to two types of disruptions:
 
-1. **Meteorological Shocks** — Rain and snow affecting track friction, visibility, and portal entry speeds.
-2. **Social Shocks** — "Student Surges" during BU class transition windows that spike boarding volumes at key stations.
+1. **Weather** — Rain and snow that affect track  friction and conductor visibility, and subsequently how quickly a car can stop and start.
 
-This project builds a context-aware predictive model that treats a commute as a sequence of **Running Time** (inter-station movement) and **Dwell Time** (platform boarding) segments rather than a single event. Two XGBoost regressors are trained separately on these components, then composed into a trip calculator that accounts for how weather and the BU Academic Calendar affect a student's specific commute.
+2. **BU Class Schedules** — BU "class transition windows" that spike boarding volumes at key stations as students hustle to and from classes.
+
+This project builds a context-aware predictive model that treats a commute along the B-line as a sequence of **Running Time** (inter-station movement) and **Dwell Time** (platform boarding) segments rather than a single event. 
+
+Two XGBoost regressors are trained separately on years of data from the MBTA for these two components, then combined into a trip calculator that accounts for how weather, class transition periods, and the BU Academic Calendar affect a student's specific commute.
+
+**Why include the BU Academic Calendar?** The calendar tells the model when school is actually in session. For example, on a Saturday in the first week of January, there are no classes, so the model doesn't need to look for class transition surges that aren't happening. 
 
 **Current model performance:**
 - Dwell Time MAE: ~20 seconds
