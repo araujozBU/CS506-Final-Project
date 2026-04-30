@@ -1,6 +1,8 @@
 # The BU Commuter's Guide to the B-Branch: Predicting Transit Reliability
 ### *A Segment-Level Analysis of Weather and Academic Schedule Impacts*
 
+[INSERT YOUTUBE VIDEO LINK HERE]
+
 ## Project Description
 
 Because the MBTA's Green Line B-Branch runs at street level through Boston University, it is uniquely susceptible to two types of disruptions:
