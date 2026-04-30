@@ -30,14 +30,21 @@ The project includes a Streamlit web app where users configure their trip, weath
 ```
 .
 ├── requirements.txt              # Python dependencies
+├── figures/
+│   ├── fig1_hourly_class_vs_nonclass.png
+│   ├── fig2_weather_impact.png
+│   ├── fig3_data_processing.png
+│   ├── fig4_stop_pair_times.png
+│   ├── fig5_feature_importances.png
+│   └── fig6_results.png
 ├── scripts/
 │   ├── dataset_creation.py       # ETL pipeline — downloads raw MBTA data, merges weather, outputs Parquet
 │   ├── dataset_example.py        # Utility — streams sample rows from Hugging Face for inspection
+│   ├── data_visualization.py     # Generates exploratory figures saved to figures/
 │   ├── model.py                  # Model training, backtesting, and prediction logic
 │   ├── app.py                    # Streamlit web UI
 │   └── model_artifacts/
-│       ├── model_dwell.pkl       # Trained XGBoost dwell-time model
-│       ├── model_travel.pkl      # Trained XGBoost running-time model
+│       ├── model.pkl             # Trained XGBoost model
 │       ├── label_encoder.pkl     # Stop-pair label encoder
 │       └── metadata.json         # Stop names, model metrics, feature importance
 ```
@@ -49,7 +56,7 @@ The project includes a Streamlit web app where users configure their trip, weath
 - **Python:** 3.10 or later
 - **OS:** macOS, Linux, or Windows (WSL recommended on Windows)
 - **Hardware:** No GPU required; training runs on CPU in under a few minutes
-- **Disk:** ~500 MB for raw MBTA data download and Parquet output
+- **Disk:** No large download required to run the app, model artifacts are included. Rebuilding the dataset from scratch (~500 MB) requires running dataset_creation.py separately.
 
 ---
 
@@ -71,10 +78,14 @@ Open the URL printed in your terminal (typically `http://localhost:8501`). Confi
 
 - **Route** — Start and end station (8 stations across Westbound/Eastbound)
 - **Time** — Hour, day of week, month
-- **Weather** — Temperature (°F), precipitation (mm), snow depth (mm)
-- **BU context** — Toggle "BU Class Day" to auto-infer active hours and surge flags
+- **Weather** — Temperature (°C), precipitation (mm), snow depth (mm)
+- **BU Context** — Toggle on/off to reflect if it's a BU class day
 
-The app displays a segment-by-segment breakdown showing predicted time versus the historical baseline for each stop pair.
+The app displays a segment-by-segment breakdown showing predicted time versus the historical baseline for each **stop pair**.
+
+- A "stop pair" is two consecutive stations — for example, "BU East → BU Central." The B-Line trip is broken into a series of these pairs, and the app predicts the travel time for each stop pair individually, rather than giving a single time prediction for the whole trip. 
+
+- Why? Delays are not evenly distributed: a class transition surge might slow boarding at BU Central while the rest of the route is unaffected. Predicting each segment separately lets the model capture these localized effects instead of averaging them away.
 
 ### Inspect a Dataset Sample
 
@@ -101,6 +112,8 @@ Streams 10 rows from the Hugging Face ML-ready dataset for quick inspection with
 
 The project includes a built-in **walk-forward backtesting** function in [`scripts/model.py`](scripts/model.py) that evaluates model generalization by training on earlier data and testing on later dates.
 
+- Why? This won't allow the model to see future data in training, and mimics the way things would work in real life: analyzing past T transit times and evaluating on future data.
+
 To run backtesting, uncomment the `backtest(df)` call at the bottom of `scripts/model.py` and re-run:
 
 ```bash
@@ -108,6 +121,20 @@ python scripts/model.py
 ```
 
 This performs a 4-split temporal cross-validation using `GroupShuffleSplit` by stop pair, printing MAE and R² for each split.
+
+- The dataset is divided into 4 time windows. The model trains on window 1, tests on window 2, then trains on windows 1–2, tests on window 3 — and so on. Each split produces a score, and then those scores are averaged to judge overall accuracy.
+
+   - Why? This avoids overfitting.
+
+- The splitting ensures that data from the same pair of stations (i.e., all "BU East → BU Central" rows) won't be split across train and test sets.
+
+   - Why? This could otherwise inflate the model's appearance of accuracy.
+
+- MAE (Mean Absolute Error) — how many seconds off the model's predictions are, on average.
+   - It is directly interpretable: an MAE of 20 seconds means the prediction is wrong by about 20 seconds.
+
+- R² (R-squared) — how much of the real-world variation in travel times the model explains, on a 0–1 scale (1 = perfect).
+   - MAE alone doesn't tell if the model is actually capturing patterns or just guessing near the average every time. R² reveals whether the model responds meaningfully to changing conditions.
 
 To verify the dataset pipeline, `dataset_example.py` streams a small sample from Hugging Face for manual inspection:
 
