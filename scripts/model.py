@@ -18,7 +18,7 @@ import pickle
 import os
 from datetime import datetime
 
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
@@ -114,11 +114,12 @@ def train_model(df: pd.DataFrame):
     X_travel = df[FEATURE_COLS_TRAVEL]
     y_travel = df[TARGET_COL_TRAVEL]
     
-    groups = df["stop_pair"]  # group by stop pair for split
+    groups = df["stop_pair"]
 
     # Train/test split grouped by stop pair so each pair appears in both sets
-    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
-    train_idx, test_idx = next(gss.split(X_dwell, y_dwell, groups))
+    train_idx, test_idx = train_test_split(
+        range(len(df)), test_size=0.2, random_state=42
+    )
 
     # -- Train Dwell Model --
     model_dwell = xgb.XGBRegressor(
@@ -256,7 +257,7 @@ def predict_travel_time(
 ):
     """
     Returns predicted dwell and travel time (seconds) for a single scenario.
-    Also returns 'baseline' (historical median for that pair).
+    Also returns historical medians for travel and dwell for that pair.
     """
     stop_pair = f"{from_stop_id}_{to_stop_id}"
 
@@ -298,18 +299,25 @@ def predict_travel_time(
     
     travel_pred = float(model_travel.predict(row_travel[FEATURE_COLS_TRAVEL])[0])
 
-    # Historical baseline
+    # Historical baselines
     pair_mask = (df_ref["from_stop_id"].astype(str) == str(from_stop_id)) & \
                 (df_ref["to_stop_id"].astype(str) == str(to_stop_id))
-    
-    baseline = None
-    if pair_mask.any() and "travel_time_sec" in df_ref.columns:
-        baseline = float(df_ref.loc[pair_mask, "travel_time_sec"].median())
+
+    baseline_sec = None
+    baseline_dwell_sec = None
+    if pair_mask.any():
+        if "travel_time_sec" in df_ref.columns:
+            baseline_sec = float(df_ref.loc[pair_mask, "travel_time_sec"].median())
+        if "dwell_time_sec" in df_ref.columns:
+            dwell_values = df_ref.loc[pair_mask, "dwell_time_sec"].dropna()
+            if not dwell_values.empty:
+                baseline_dwell_sec = float(dwell_values.median())
     
     return {
         "predicted_dwell_sec": dwell_pred,
         "predicted_sec": travel_pred,
-        "baseline_sec": baseline,
+        "baseline_sec": baseline_sec,
+        "baseline_dwell_sec": baseline_dwell_sec,
         "feature_row": row_travel_dict
     }
 
@@ -348,12 +356,21 @@ def compare_scenarios(model_dwell, model_travel, le, df_ref, from_stop, to_stop,
 
 def load_training_data_from_huggingface():
     """
-    Loads the real ML-ready dataset from Hugging Face.
+    Loads the ML-ready dataset from local parquet if available,
+    otherwise downloads from Hugging Face.
     """
-    from datasets import load_dataset
-    print("      Downloading dataset from Hugging Face...")
-    dataset = load_dataset("adybacki/bu_green_line_ml_ready", split="train")
-    df = dataset.to_pandas()
+    import os
+    
+    local_parquet = "bu_green_line_gold.parquet"
+    
+    if os.path.exists(local_parquet):
+        print(f"      Loading dataset from local file: {local_parquet}")
+        df = pd.read_parquet(local_parquet)
+    else:
+        from datasets import load_dataset
+        print("      Downloading dataset from Hugging Face...")
+        dataset = load_dataset("adybacki/bu_green_line_ml_ready", split="train")
+        df = dataset.to_pandas()
 
     stop_names = {
         # Westbound (Outbound)

@@ -212,15 +212,21 @@ def create_gold_dataset(n_examples=None):
     df['from_stop_departure_datetime'] = pd.to_datetime(df['from_stop_departure_datetime'])
     df['to_stop_arrival_datetime'] = pd.to_datetime(df['to_stop_arrival_datetime'])
     
-    # Calculate Dwell
+    # Calculate Dwell at origin (time spent at each segment's departure station)
     df = df.sort_values(by=['trip_id', 'from_stop_departure_datetime'])
-    df['next_from_stop_id'] = df.groupby('trip_id')['from_stop_id'].shift(-1)
-    df['next_departure'] = df.groupby('trip_id')['from_stop_departure_datetime'].shift(-1)
-    mask = df['to_stop_id'] == df['next_from_stop_id']
-    df.loc[mask, 'dwell_time_sec'] = (df['next_departure'] - df['to_stop_arrival_datetime']).dt.total_seconds()
+    # Shift arrival times to align with current segment's origin
+    df['prev_arrival_at_origin'] = df.groupby('trip_id')['to_stop_arrival_datetime'].shift(1)
+    # Dwell = departure time from origin - arrival time at origin (from previous segment)
+    df['dwell_time_sec'] = (df['from_stop_departure_datetime'] - df['prev_arrival_at_origin']).dt.total_seconds()
     
     # Clean Outliers
-    df = df[(df['dwell_time_sec'] >= 0) & (df['dwell_time_sec'] < 600)].copy()
+    df = df[
+        df['dwell_time_sec'].isna() |
+        ((df['dwell_time_sec'] >= 0) & (df['dwell_time_sec'] < 600))
+    ].copy()
+    
+    # Drop temporary helper columns
+    df = df.drop(columns=['prev_arrival_at_origin'], errors='ignore')
     
     # Add BU Semester & Class Time Logic
     df = add_bu_semester_logic(df)
@@ -253,8 +259,9 @@ def create_gold_dataset(n_examples=None):
     final_df['prcp'] = final_df['prcp'].round(2)
     final_df['snow'] = final_df['snow'].round(2)
     
-    # Drop rows where we couldn't calculate a dwell (end of trips)
-    return final_df.dropna(subset=['dwell_time_sec'])
+    # Keep terminal segments even when dwell cannot be computed.
+    # Downstream training fills missing dwell values.
+    return final_df
 
 # Execution and ds upload
 # Set n_examples to None to comb through the entire dataset

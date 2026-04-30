@@ -36,9 +36,20 @@ div[data-testid="metric-container"] {
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 UNIQUE_STATIONS = [
-    "Hynes", "Kenmore", "Blandford St", "BU East",
-    "BU Central", "Amory", "Babcock", "Packard's"
+    "Kenmore", "Blandford St", "BU East",
+    "BU Central", "Amory", "Babcock"
 ]
+
+ROUTE_STATIONS = {
+    "Westbound": [
+        "Hynes", "Kenmore", "Blandford St", "BU East",
+        "BU Central", "Amory", "Babcock",
+    ],
+    "Eastbound": [
+        "Packard's", "Babcock", "Amory", "BU Central",
+        "BU East", "Blandford St", "Kenmore",
+    ],
+}
 
 PLATFORM_IDS = {
     "Westbound": {
@@ -93,6 +104,15 @@ def format_time(seconds):
 
 def segment_traffic_html(segments_data):
     """Color-coded route map: green = on time, yellow = slight, red = heavy delay."""
+    if not segments_data:
+        return (
+            '<div style="background:white;border-radius:12px;padding:18px 22px;'
+            'box-shadow:0 2px 8px rgba(0,0,0,0.07);margin-bottom:4px;'
+            'color:#546e7a;font-size:0.9rem;">'
+            'No route segments available for the selected stations.'
+            '</div>'
+        )
+
     def seg_color(ratio):
         if ratio <= -0.05: return "#2E7D32"
         if ratio <=  0.05: return "#66BB6A"
@@ -251,6 +271,11 @@ df_ref = load_reference_data()
 for k, v in [("sel_from", "Kenmore"), ("sel_to", "Babcock"), ("select_mode", "from")]:
     if k not in st.session_state:
         st.session_state[k] = v
+
+if st.session_state["sel_from"] not in UNIQUE_STATIONS:
+    st.session_state["sel_from"] = "Kenmore"
+if st.session_state["sel_to"] not in UNIQUE_STATIONS:
+    st.session_state["sel_to"] = "Babcock"
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -413,8 +438,25 @@ if predict_clicked:
         )
         st.stop()
 
-    step             = 1 if direction == "Westbound" else -1
-    route_stop_names = UNIQUE_STATIONS[from_idx : to_idx + step : step]
+    route_stations = ROUTE_STATIONS[direction]
+    try:
+        route_start_idx = route_stations.index(from_stop_name)
+        route_end_idx = route_stations.index(to_stop_name)
+    except ValueError:
+        st.error("Could not build a valid route for the selected stop pair.")
+        st.stop()
+
+    if route_start_idx == route_end_idx:
+        st.error("Please select different start and end stops.")
+        st.stop()
+
+    step = 1 if route_start_idx < route_end_idx else -1
+    route_stop_names = route_stations[route_start_idx:route_end_idx + step:step]
+
+    if len(route_stop_names) < 2:
+        st.error("Could not build a valid route for the selected stop pair.")
+        st.stop()
+
     is_weekend       = int(day_of_week >= 5)
     is_peak_am       = int(7 <= hour <= 9)
     is_peak_pm       = int(16 <= hour <= 19)
@@ -444,6 +486,7 @@ if predict_clicked:
         travel_sec = pred["predicted_sec"]
         dwell_sec  = pred["predicted_dwell_sec"]
         base_sec   = pred["baseline_sec"]
+        base_dwell_sec = pred.get("baseline_dwell_sec")
 
         total_travel += travel_sec
         if i > 0:
@@ -454,6 +497,7 @@ if predict_clicked:
             "travel_sec": travel_sec,
             "dwell_sec":  dwell_sec,
             "base_sec":   base_sec,
+            "base_dwell_sec": base_dwell_sec,
         })
         row = pred["feature_row"]
 
@@ -636,11 +680,13 @@ if predict_clicked:
 
     # ── Table ─────────────────────────────────────────────────────────────
     st.markdown("### Detailed Table")
+    st.caption("Dwell times show how long the train stops at the origin station before leaving for the next segment.")
     df_display = pd.DataFrame([{
         "Segment":          d["Segment"],
+        "Predicted Dwell (Origin Stop)":  format_time(d["dwell_sec"]),
+        "Baseline Dwell (Origin Stop)":   format_time(d["base_dwell_sec"]),
         "Predicted Travel": format_time(d["travel_sec"]),
         "Baseline Travel":  format_time(d["base_sec"]),
-        "Predicted Dwell":  format_time(d["dwell_sec"]),
     } for d in segments_data])
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
