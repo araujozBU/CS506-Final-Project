@@ -486,6 +486,7 @@ if predict_clicked:
         travel_sec = pred["predicted_sec"]
         dwell_sec  = pred["predicted_dwell_sec"]
         base_sec   = pred["baseline_sec"]
+        base_dwell_sec = pred.get("baseline_dwell_sec")
 
         total_travel += travel_sec
         if i > 0:
@@ -496,6 +497,7 @@ if predict_clicked:
             "travel_sec": travel_sec,
             "dwell_sec":  dwell_sec,
             "base_sec":   base_sec,
+            "base_dwell_sec": base_dwell_sec,
         })
         row = pred["feature_row"]
 
@@ -683,6 +685,7 @@ if predict_clicked:
         "Predicted Travel": format_time(d["travel_sec"]),
         "Baseline Travel":  format_time(d["base_sec"]),
         "Predicted Dwell":  format_time(d["dwell_sec"]),
+        "Baseline Dwell":   format_time(d["base_dwell_sec"]),
     } for d in segments_data])
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
