@@ -54,8 +54,9 @@ def save(fig, name):
 
 # ── LOAD & PREPARE DATA ────────────────────────────────────────────────────────
 
-print("Loading data...")
-df_raw = pd.read_parquet(PARQUET_PATH)
+print("Loading data from Hugging Face...")
+from datasets import load_dataset
+df_raw = load_dataset("adybacki/bu_green_line_ml_ready", split="train").to_pandas()
 print(f"  {len(df_raw):,} raw rows")
 
 print("Building features using model.build_features()...")
@@ -327,6 +328,70 @@ ax2.grid(axis="y", alpha=0.3, linestyle="--")
 
 fig.tight_layout(pad=2)
 save(fig, "fig6_results.png")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FIG 7 — Dwell Time by Hour: Class Day vs Non-Class Day        [Data Viz]
+# ══════════════════════════════════════════════════════════════════════════════
+print("[7/8] Hourly dwell time: class day vs non-class day")
+
+df_dwell = df[df["dwell_time_sec"] > 0]  # exclude zero-dwell (no boarding)
+
+hourly_dwell = (
+    df_dwell.groupby(["hour", "is_bu_class_day"])["dwell_time_sec"]
+    .median()
+    .reset_index()
+)
+class_dwell   = hourly_dwell[hourly_dwell["is_bu_class_day"] == 1]
+noclass_dwell = hourly_dwell[hourly_dwell["is_bu_class_day"] == 0]
+
+fig, ax = plt.subplots(figsize=(11, 5))
+ax.plot(class_dwell["hour"],   class_dwell["dwell_time_sec"],
+        color="#CC0000", lw=2.5, marker="o", ms=5, label="BU Class Day")
+ax.plot(noclass_dwell["hour"], noclass_dwell["dwell_time_sec"],
+        color="#00843D", lw=2.5, marker="o", ms=5, label="Non-Class Day")
+
+for xstart, xend, label in [(8, 10, "Morning Peak"), (12, 14, "Midday Peak"), (16, 18, "Afternoon Peak")]:
+    ax.axvspan(xstart, xend, alpha=0.10, color="#F5A623")
+    ax.text((xstart + xend) / 2, ax.get_ylim()[1] * 0.97 if ax.get_ylim()[1] > 1 else 60,
+            label, ha="center", va="top", fontsize=8, color="#b07000")
+
+ax.set_xticks(range(6, 24))
+ax.set_xticklabels([f"{h}:00" for h in range(6, 24)], rotation=45, fontsize=8)
+ax.set_xlabel("Hour of Day", fontsize=11)
+ax.set_ylabel("Median Dwell Time (seconds)", fontsize=11)
+ax.set_title("Green Line Dwell Time by Hour — Class Days vs. Non-Class Days",
+             fontsize=13, fontweight="bold", pad=12)
+ax.legend(fontsize=10)
+ax.grid(axis="y", alpha=0.4, linestyle="--")
+fig.tight_layout()
+save(fig, "fig7_hourly_dwell_class_vs_nonclass.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FIG 8 — Median Dwell Time Per Stop Pair                       [Data Processing]
+# ══════════════════════════════════════════════════════════════════════════════
+print("[8/8] Dwell time per stop pair")
+
+dwell_pair_stats = (
+    df_dwell.groupby("stop_pair_name")["dwell_time_sec"]
+    .agg(median="median", count="count")
+    .sort_values("median", ascending=True)
+)
+dwell_pair_stats = dwell_pair_stats[dwell_pair_stats["count"] > 500]
+
+fig, ax = plt.subplots(figsize=(10, max(4, len(dwell_pair_stats) * 0.45)))
+bars = ax.barh(dwell_pair_stats.index, dwell_pair_stats["median"],
+               color="#4A9EFF", edgecolor="#1a5fa8", height=0.6)
+for bar, med in zip(bars, dwell_pair_stats["median"]):
+    ax.text(med + 0.5, bar.get_y() + bar.get_height() / 2,
+            f"{med:.0f}s", va="center", fontsize=9)
+
+ax.set_xlabel("Median Dwell Time (seconds)", fontsize=11)
+ax.set_title("Median Dwell Time Per Stop-to-Stop Segment\n(non-zero dwell only)",
+             fontsize=13, fontweight="bold", pad=12)
+ax.grid(axis="x", alpha=0.4, linestyle="--")
+fig.tight_layout()
+save(fig, "fig8_dwell_per_stop_pair.png")
 
 # ── SUMMARY ────────────────────────────────────────────────────────────────────
 
