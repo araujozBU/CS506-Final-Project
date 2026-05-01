@@ -110,6 +110,68 @@ Streams 10 rows from the Hugging Face ML-ready dataset for quick inspection with
 
 ---
 
+## Data Collection and Cleaning
+
+**The Raw Data:** The MBTA travel time CSVs contain arrival and departure event records for every Green Line trip across all (B, C, D and E) branches. Each row represents a single station-to-station segment, but the full dataset includes all routes, all stop pairs, and many columns not relevant to this project.
+
+**Filtering:** `dataset_creation.py` immediately filters to `route_id == 'Green-B'` and then does an inner join against the 12 adjacent stop pairs defined for the BU corridor, discarding everything else
+
+**Handling missing/outlier values:**
+
+- **Dwell time** is computed by subtracting a trip's previous segment arrival time from the current segment's departure time. 
+   - For the first segment of any trip this can't be calculated, so those values are left as `NaN` and handled downstream during model training.
+- **Dwell outliers**, any computed dwell time that is negative (artifacts) or ≥ 600 seconds (10 minutes, likely a service gap rather than normal boarding) are dropped.
+- **Snow depth** — the Meteostat API omits the `snow` column entirely when there is no snow. These are filled with `0` after the weather merge.
+- **Temperature and precipitation** — any hours with missing weather readings are filled using backward-fill then forward-fill, propagating the nearest valid hourly reading.
+- **Floating point cleanup** — weather values are rounded after filling (`temp` to 1 decimal, `prcp` and `snow` to 2 decimals).
+
+**What the script produces:** A Parquet file with one row per valid B-Branch segment event, joined with hourly weather and BU calendar flags (`is_bu_class_day`, `is_active_class_time`, `is_student_surge`), ready for model training.
+
+---
+
+## Feature Extraction
+
+Features are built in `build_features()` in [`scripts/model.py`](scripts/model.py) and fall into four groups:
+
+**Time features** — extracted directly from the departure timestamp:
+- `hour`, `minute`, `day_of_week`, `month` — when the trip happened
+- `is_weekend` — weekends have lighter, more predictable ridership than weekdays
+- `is_peak_am` (7–9 AM), `is_peak_pm` (4–7 PM) — morning and evening rush hours
+
+**Weather features** — hourly readings from Boston Logan Airport, joined by date and hour:
+- `temp`, `prcp`, `snow` — temperature (°C), rainfall (mm), and snow depth (mm)
+- `is_precipitating`, `is_snowing` — simple yes/no flags for whether it's currently raining or snowing
+- `heavy_snow` — yes/no flag for snow depth over 5 mm, the threshold where service slowdowns become noticeable
+
+**BU calendar flags** — engineered in `dataset_creation.py` from the manually curated academic calendar:
+- `is_bu_class_day` — 1 if the date falls in a semester, is a weekday, and is not a holiday or spring break
+- `is_active_class_time` — 1 if `is_bu_class_day` and the hour is between 8 AM–6 PM
+- `is_student_surge` — 1 if the timestamp falls within a ~15-minute window after a BU class end time (MWF or TR schedule). A value of 2 flags the "triple-wave hotspot" (Tuesdays/Thursdays at 10:45 AM, when three overlapping class types all end simultaneously)
+
+**Stop pair identifier** — `stop_pair_enc`, a label-encoded integer representing the specific station-to-station segment (e.g. "BU East → BU Central"). This lets the model learn a baseline for each segment without needing separate models per pair.
+
+**What was tried and dropped:** Raw `trip_id` was available but not used. It is a unique identifier per trip and would cause the model to memorize individual trips rather than learn general patterns. Direction (Eastbound/Westbound) is implicitly captured by the stop pair encoding since each direction uses distinct stop IDs.
+
+---
+
+## Model
+
+The project uses two **XGBoost regressors** — one for dwell time, one for running time — trained separately and then combined at prediction time.
+
+**Why XGBoost?**
+
+- **Handles mixed feature types well** — the dataset mixes continuous values (temperature, snow depth) with binary flags (is it a class day? is it rush hour?) and categorical identifiers (which stop pair). XGBoost handles this naturally without needing separate preprocessing pipelines for each type.
+
+- **Captures non-linear relationships** — the effect of weather or class schedules on travel time varies. A light drizzle might add a few seconds; a blizzard adds minutes. Tree-based models learn these thresholds automatically rather than assuming a fixed linear relationship.
+
+- **Prevents Overfitting** — transit times have a lot of natural variance (signal timing, traffic, operator behavior). XGBoost's gradient boosting approach and regularization parameters (`min_child_weight`, `reg_alpha`) help prevent the model from overfitting to that noise.
+
+- **Training Speed** — the full dataset has hundreds of thousands of rows. XGBoost trains in under a few minutes on CPU, which made iteration during development practical.
+
+**Why two separate models instead of one?** Dwell time and running time are driven by different factors. Dwell is heavily influenced by how many people are boarding (class surges, time of day), while running time is more sensitive to weather and signal conditions. Training them separately lets each model focus on its own signal without one target drowning out the other.
+
+---
+
 ## Testing
 
 The project includes a built-in **walk-forward backtesting** function in [`scripts/model.py`](scripts/model.py) that evaluates model generalization by training on earlier data and testing on later dates.
