@@ -16,12 +16,6 @@ Two XGBoost regressors are trained separately on years of data from the MBTA for
 
 **Why include the BU Academic Calendar?** The calendar tells the model when school is actually in session. For example, on a Saturday in the first week of January, there are no classes, so the model doesn't need to look for class transition surges that aren't happening. 
 
-**Current model performance:**
-- Dwell Time MAE: ~20 seconds
-   - When the model predicts how long the train will sit at a stop while people board, it's off by about 20 seconds, on average.
-- Running Time MAE: ~28 seconds
-   - When the model predicts how long it takes to travel between two stops, it's off by about 28 seconds on average.
-
 The project includes a Streamlit web app where users configure their trip, weather conditions, and BU class context to receive a segment-by-segment commute prediction.
 
 ---
@@ -30,6 +24,7 @@ The project includes a Streamlit web app where users configure their trip, weath
 
 ```
 .
+├── Makefile                      # install and run targets
 ├── requirements.txt              # Python dependencies
 ├── figures/
 │   ├── fig1_hourly_class_vs_nonclass.png
@@ -48,6 +43,8 @@ The project includes a Streamlit web app where users configure their trip, weath
 │       ├── model.pkl             # Trained XGBoost model
 │       ├── label_encoder.pkl     # Stop-pair label encoder
 │       └── metadata.json         # Stop names, model metrics, feature importance
+└── tests/
+    └── test_model.py             # Model unit tests
 ```
 
 ---
@@ -87,14 +84,6 @@ The app displays a segment-by-segment breakdown showing predicted time versus th
 - A "stop pair" is two consecutive stations — for example, "BU East → BU Central." The B-Line trip is broken into a series of these pairs, and the app predicts the travel time for each stop pair individually, rather than giving a single time prediction for the whole trip. 
 
 - Why? Delays are not evenly distributed: a class transition surge might slow boarding at BU Central while the rest of the route is unaffected. Predicting each segment separately lets the model capture these localized effects instead of averaging them away.
-
-### Inspect a Dataset Sample
-
-```bash
-python scripts/dataset_example.py
-```
-
-Streams 10 rows from the Hugging Face ML-ready dataset for quick inspection without a local download.
 
 ---
 
@@ -242,8 +231,6 @@ The model tracks actual travel times closely for the 30–120 second range where
 
 The project includes a built-in **walk-forward backtesting** function in [`scripts/model.py`](scripts/model.py) that evaluates model generalization by training on earlier data and testing on later dates.
 
-- Why? This won't allow the model to see future data in training, and mimics the way things would work in real life: analyzing past T transit times and evaluating on future data.
-
 To run backtesting, uncomment the `backtest(df)` call at the bottom of `scripts/model.py` and re-run:
 
 ```bash
@@ -254,23 +241,7 @@ This performs a 4-split temporal cross-validation using `GroupShuffleSplit` by s
 
 - The dataset is divided into 4 time windows. The model trains on window 1, tests on window 2, then trains on windows 1–2, tests on window 3 — and so on. Each split produces a score, and then those scores are averaged to judge overall accuracy.
 
-   - Why? This avoids overfitting.
-
-- The splitting ensures that data from the same pair of stations (i.e., all "BU East → BU Central" rows) won't be split across train and test sets.
-
-   - Why? This could otherwise inflate the model's appearance of accuracy.
-
-- MAE (Mean Absolute Error) — how many seconds off the model's predictions are, on average.
-   - It is directly interpretable: an MAE of 20 seconds means the prediction is wrong by about 20 seconds.
-
-- R² (R-squared) — how much of the real-world variation in travel times the model explains, on a 0–1 scale (1 = perfect).
-   - MAE alone doesn't tell if the model is actually capturing patterns or just guessing near the average every time. R² reveals whether the model responds meaningfully to changing conditions.
-
-To verify the dataset pipeline, `dataset_example.py` streams a small sample from Hugging Face for manual inspection:
-
-```bash
-python scripts/dataset_example.py
-```
+- The splitting ensures that all rows for a given stop pair (e.g., "BU East → BU Central") stay together — splitting them across train and test would inflate apparent accuracy.
 
 ---
 
