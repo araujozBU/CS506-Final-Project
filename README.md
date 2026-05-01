@@ -1,5 +1,4 @@
 # The BU Commuter's Guide to the B-Branch: Predicting Transit Reliability
-### *A Segment-Level Analysis of Weather and Academic Schedule Impacts*
 
 [INSERT YOUTUBE VIDEO LINK HERE]
 
@@ -169,6 +168,73 @@ The project uses two **XGBoost regressors** — one for dwell time, one for runn
 - **Training Speed** — the full dataset has hundreds of thousands of rows. XGBoost trains in under a few minutes on CPU, which made iteration during development practical.
 
 **Why two separate models instead of one?** Dwell time and running time are driven by different factors. Dwell is heavily influenced by how many people are boarding (class surges, time of day), while running time is more sensitive to weather and signal conditions. Training them separately lets each model focus on its own signal without one target drowning out the other.
+
+---
+
+## Results
+
+**Model performance** (evaluated on a held-out 20% test set):
+
+| Metric | Dwell Time Model | Travel Time Model |
+|--------|-----------------|-------------------|
+| MAE | ~20 seconds | ~28 seconds |
+| R² | — | 0.485 |
+| Baseline MAE | — | ~18 seconds |
+
+---
+
+### Class Days vs. Non-Class Days
+
+![Green Line Travel Time by Hour — Class Days vs. Non-Class Days](figures/fig1_hourly_class_vs_nonclass.png)
+
+During BU class days (red), travel times are consistently 2–5 seconds higher per segment across the day, with the gap widening during morning, midday, and afternoon class transition windows. Non-class days (green) show a flatter, more predictable pattern throughout the day.
+
+---
+
+### Weather Impact
+
+![Impact of Weather on Green Line Travel Time](figures/fig2_weather_impact.png)
+
+Across all weather conditions — clear, rain, snow, and heavy snow — the median travel time stays nearly flat at ~74 seconds per segment. Weather contributes less to travel time than class schedule context, and its effect shows up more in variance (wider error bars) than in the median. This is consistent with the feature importance chart below.
+
+---
+
+### Dataset Coverage
+
+![Data Volume Over Time and Missing Values](figures/fig3_data_processing.png)
+
+The dataset covers 26 months of B-Branch segment events (January 2024 – February 2026), with ~25,000–39,000 segments recorded per month. After cleaning, no missing values remain in the final training dataset.
+
+---
+
+### Segment Baselines
+
+![Median Travel Time Per Stop-to-Stop Segment](figures/fig4_stop_pair_times.png)
+
+Travel times vary significantly by segment. The BU Central → Amory St stretch (108s) takes over three times as long as BU East → BU Central (30s), which is why segment-level prediction matters.
+
+---
+
+### Feature Importances
+
+![What Factors Most Affect Green Line Travel Time](figures/fig5_feature_importances.png)
+
+Stop pair identity dominates (0.800 importance score) — meaning which segment of track the train is on explains most of the variance in travel time. After that, the BU calendar flags (`is_active_class_time`, `is_bu_class_day`) and time-of-day features rank highest. Weather features (snowfall, precipitation, temperature) all score below 0.010, consistent with the weather impact chart above.
+
+---
+
+### Predicted vs. Actual Travel Time
+
+![Predicted vs. Actual Travel Time](figures/fig6_results.png)
+
+The model tracks actual travel times closely for the 30–120 second range where most segments fall. The right panel shows prediction errors are tightly centered near zero, with a mean error of 3.7 seconds. The model struggles more with outliers — very long travel times caused by incidents, signal holds, or service gaps that don't appear consistently enough in the data to learn from.
+
+---
+
+**Limitations:**
+- **Incident blindness** — the model has no awareness of MBTA service alerts, track work, or operator delays. These cause the largest real-world deviations and are the primary driver of high-error predictions.
+- **Weather signal is weak** — weather affects the B-Line less than expected, likely because the MBTA already adjusts operations during severe conditions. The model reflects this but can't predict how operations will be adjusted.
+- **Calendar gaps** — predictions outside the 2024–2026 training window (e.g., future semesters with different schedules) may be slightly less accurate until the model is retrained.
 
 ---
 
