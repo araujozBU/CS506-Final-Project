@@ -162,13 +162,17 @@ The project uses two **XGBoost regressors** — one for dwell time, one for runn
 
 ## Results
 
-**Model performance** (evaluated on a held-out 20% test set):
+**Model performance** (evaluated on a held-out 20% test set, n=190,248):
 
 | Metric | Dwell Time Model | Travel Time Model |
 |--------|-----------------|-------------------|
-| MAE | ~20 seconds | ~28 seconds |
-| R² | — | 0.485 |
-| Baseline MAE | — | ~18 seconds |
+| MAE | ~15 seconds | ~18 seconds |
+| R² | not reported * | 0.42 |
+| Baseline MAE | n/a † | n/a † |
+
+\* R² is not reported for the dwell model. Dwell time has high irreducible variance — many segments have zero dwell when no passengers board at a stop — which causes R² to be an unreliable indicator of model quality. MAE is the appropriate metric here.
+
+† Baseline MAE (median travel time per stop pair) is computed during walk-forward backtesting but is not recorded in the main train/test split. To see baseline comparisons per fold, uncomment the `backtest(df)` call in `scripts/model.py` and run `make train`.
 
 ---
 
@@ -229,7 +233,15 @@ The model tracks actual travel times closely for the 30–120 second range where
 
 ## Testing
 
-The project includes a built-in **walk-forward backtesting** function in [`scripts/model.py`](scripts/model.py) that evaluates model generalization by training on earlier data and testing on later dates.
+Run the unit test suite with:
+
+```bash
+make test
+```
+
+This runs all tests in `tests/` via pytest. The tests cover feature engineering, outlier filtering, BU calendar logic, and surge flag detection — without requiring the full dataset or trained models.
+
+The project also includes a built-in **walk-forward backtesting** function in [`scripts/model.py`](scripts/model.py) that evaluates model generalization by training on earlier data and testing on later dates.
 
 To run backtesting, uncomment the `backtest(df)` call at the bottom of `scripts/model.py` and re-run:
 

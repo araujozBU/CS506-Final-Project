@@ -43,6 +43,13 @@ train: install
 	@echo "Training models and saving artifacts..."
 	$(PY) scripts/model.py
 
+# ── test ───────────────────────────────────────────────────────────────────────
+# Runs the unit test suite.
+.PHONY: test
+test: install
+	@echo "Running tests..."
+	$(PY) -m pytest tests/ -v
+
 # ── clean ──────────────────────────────────────────────────────────────────────
 # Removes the virtual environment and any locally generated dataset files.
 .PHONY: clean
