@@ -40,7 +40,7 @@ multidict==6.7.1
 multiprocess==0.70.19
 narwhals==2.19.0
 numpy==2.4.3
-nvidia-nccl-cu12==2.30.3
+nvidia-nccl-cu12==2.30.3; sys_platform == "linux"
 packaging==26.0
 pandas==3.0.1
 pillow==12.2.0
