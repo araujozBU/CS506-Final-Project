@@ -1,6 +1,6 @@
 # The BU Commuter's Guide to the B-Branch: Predicting Transit Reliability
 
-[INSERT YOUTUBE VIDEO LINK HERE]
+[Watch the project video](https://youtu.be/Bzhpv_D9tRo)
 
 ## Project Description
 
